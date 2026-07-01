@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -35,6 +36,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 type NavItem = { title: string; href: string; icon: React.ComponentType };
@@ -83,6 +87,7 @@ export function AppSidebar({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { isMobile, setOpen, state } = useSidebar();
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -98,25 +103,70 @@ export function AppSidebar({
     .toUpperCase()
     .slice(0, 2);
 
+  const activeHref = navSections
+    .flatMap((section) => section.items)
+    .map((item) => item.href)
+    .filter((href) => {
+      if (pathname === href) return true;
+      if (href === "/dashboard") return false;
+
+      return pathname.startsWith(`${href}/`);
+    })
+    .sort((a, b) => b.length - a.length)[0];
+
   function isActive(href: string) {
-    if (href === "/dashboard") return pathname === "/dashboard";
-    return pathname.startsWith(href);
+    return activeHref === href;
+  }
+
+  function expandCollapsedSidebar(event: React.MouseEvent<HTMLDivElement>) {
+    if (isMobile || state !== "collapsed" || event.defaultPrevented) return;
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (
+      target.closest(
+        "a, button, input, textarea, select, [role='button'], [role='menuitem']",
+      )
+    ) {
+      return;
+    }
+
+    setOpen(true);
   }
 
   return (
-    <Sidebar>
-      <SidebarHeader>
-        <div className="flex items-center gap-2.5 px-2 pt-3 pb-1">
-          <Link href="/dashboard" className="flex items-center gap-2.5">
-            <Radar className="size-5 text-primary" />
-            <span className="text-sm font-semibold tracking-[0.15em] uppercase">Radar</span>
+    <Sidebar collapsible="icon">
+      <SidebarHeader
+        className="group-data-[collapsible=icon]:cursor-e-resize group-data-[collapsible=icon]:p-1.5"
+        onClick={expandCollapsedSidebar}
+      >
+        <div className="flex items-center gap-2.5 px-2 pt-3 pb-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <Link
+            href="/dashboard"
+            className="flex min-w-0 items-center gap-2.5 group-data-[collapsible=icon]:justify-center"
+          >
+            <Radar className="size-5 shrink-0 text-primary" />
+            <span className="truncate text-sm font-semibold tracking-[0.15em] uppercase group-data-[collapsible=icon]:hidden">
+              Radar
+            </span>
           </Link>
+          <SidebarTrigger className="ml-auto size-9! p-2! text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden" />
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="pt-2">
-        {navSections.map((section) => (
-          <SidebarGroup key={section.label}>
+      <SidebarContent
+        className="pt-2 md:pt-1 group-data-[collapsible=icon]:cursor-e-resize group-data-[collapsible=icon]:pt-2"
+        onClick={expandCollapsedSidebar}
+      >
+        {navSections.map((section, index) => (
+          <Fragment key={section.label}>
+            {index > 0 && (
+              <div
+                aria-hidden="true"
+                className="mx-1.5 hidden h-px shrink-0 bg-[#e7f0f2] group-data-[collapsible=icon]:block"
+              />
+            )}
+            <SidebarGroup>
             <SidebarGroupLabel className="text-[11px] font-medium tracking-wider text-muted-foreground/60 uppercase">
               {section.label}
             </SidebarGroupLabel>
@@ -136,11 +186,15 @@ export function AppSidebar({
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
-          </SidebarGroup>
+            </SidebarGroup>
+          </Fragment>
         ))}
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter
+        className="group-data-[collapsible=icon]:cursor-e-resize group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-1.5"
+        onClick={expandCollapsedSidebar}
+      >
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -148,17 +202,17 @@ export function AppSidebar({
                 render={
                   <SidebarMenuButton
                     size="lg"
-                    className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+                    className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:hover:bg-transparent! group-data-[collapsible=icon]:hover:text-sidebar-foreground!"
                   />
                 }
               >
-                <Avatar size="sm">
+                <Avatar className="size-9">
                   {user.avatarUrl && (
                     <AvatarImage src={user.avatarUrl} alt={user.name} />
                   )}
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                   <span className="truncate font-medium">{user.name}</span>
                   <span className="truncate text-xs text-muted-foreground">
                     {user.email}
@@ -179,6 +233,7 @@ export function AppSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <SidebarRail className="sm:hidden md:flex" />
     </Sidebar>
   );
 }

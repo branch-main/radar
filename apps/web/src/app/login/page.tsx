@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Radar } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -5,6 +6,10 @@ import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/password-input";
 import { SubmitButton } from "@/components/submit-button";
 import { login, loginWithGoogle } from "./actions";
+
+export const metadata: Metadata = {
+  title: "Iniciar sesión",
+};
 
 export default async function LoginPage({
   searchParams,

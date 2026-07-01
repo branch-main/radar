@@ -23,7 +23,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Radar",
+  title: {
+    default: "Radar",
+    template: "%s - Radar",
+  },
   description: "Panel de Administración",
 };
 
