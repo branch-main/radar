@@ -165,6 +165,35 @@
   }
 }
 
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+[data-slot="skeleton"]::after {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  animation: skeleton-shimmer 1.15s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.72), transparent);
+  content: "";
+}
+
+.dark [data-slot="skeleton"]::after {
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.12), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="skeleton"]::after {
+    animation: none !important;
+  }
+}
+
 @utility shadow-soft {
   box-shadow: 0 0 60px rgba(0, 0, 0, 0.018);
 }
