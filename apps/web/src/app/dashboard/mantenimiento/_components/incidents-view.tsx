@@ -2,44 +2,76 @@
 
 import {
   AlertTriangle,
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
   FilterX,
-  ImageIcon,
   MapPin,
   Search,
   SlidersHorizontal,
-  UserRoundCheck,
-  Wrench,
 } from "lucide-react";
-import { useMemo, useState, type ComponentType } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+  type MouseEvent,
+  type TransitionEvent,
+} from "react";
 
 import { updateMaintenanceAction } from "@/app/dashboard/actions";
+import {
+  Avatar as UiAvatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { badgeClass, formatLocation, statusLabel } from "@/lib/supabase/format";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { formatLocation, statusLabel } from "@/lib/supabase/format";
 import type { MaintenanceIncident, Technician } from "@/lib/supabase/types";
 
 type Option = readonly [string, string];
-type DueFilter = "all" | "overdue" | "today" | "none";
+export type DueFilter = "all" | "overdue" | "today" | "none";
 type DueState = "scheduled" | "overdue" | "today" | "none";
-type AssignmentFilter = "all" | "assigned" | "unassigned";
-type SortMode = "priority" | "newest" | "oldest" | "due";
+export type AssignmentFilter = "all" | "assigned" | "unassigned";
+export type SortMode = "priority" | "newest" | "oldest" | "due";
+export type IncidentFiltersState = {
+  query: string;
+  status: string;
+  urgency: string;
+  category: string;
+  assignment: AssignmentFilter;
+  due: DueFilter;
+  dateFrom: string;
+  dateTo: string;
+  sort: SortMode;
+  page: number;
+};
 
 type IncidentsViewProps = {
   incidents: MaintenanceIncident[];
   technicians: Technician[];
   renderedAt: string;
+  initialFilters: IncidentFiltersState;
+  totalItems: number;
+  allItemsCount: number;
+  pageCount: number;
 };
 
 type IncidentListItem = {
   incident: MaintenanceIncident;
+  assignedTechnician: Technician | null;
   technician: string;
   location: string;
   status: string;
-  haystack: string;
   dueState: DueState;
-  priority: number;
 };
 
 const statusOptions = [
@@ -68,421 +100,631 @@ const categoryOptions = [
   ["other", "Otro"],
 ] satisfies Option[];
 
-const closedStatuses = new Set(["resolved", "closed", "cancelled"]);
-const openStatuses = new Set(["classified", "assigned", "in_progress", "new"]);
 const spanishMonths = ["ene.", "feb.", "mar.", "abr.", "may.", "jun.", "jul.", "ago.", "sept.", "oct.", "nov.", "dic."];
+const pageSize = 12;
 
-export function IncidentsView({ incidents, technicians, renderedAt }: IncidentsViewProps) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
-  const [urgency, setUrgency] = useState("all");
-  const [category, setCategory] = useState("all");
-  const [assignment, setAssignment] = useState<AssignmentFilter>("all");
-  const [due, setDue] = useState<DueFilter>("all");
-  const [sort, setSort] = useState<SortMode>("priority");
+export function IncidentsView({
+  incidents,
+  technicians,
+  renderedAt,
+  initialFilters,
+  totalItems,
+  allItemsCount,
+  pageCount,
+}: IncidentsViewProps) {
+  const router = useRouter();
+  const [query, setQuery] = useState(initialFilters.query);
+  const [status, setStatus] = useState(initialFilters.status);
+  const [urgency, setUrgency] = useState(initialFilters.urgency);
+  const [category, setCategory] = useState(initialFilters.category);
+  const [assignment, setAssignment] = useState<AssignmentFilter>(initialFilters.assignment);
+  const [due, setDue] = useState<DueFilter>(initialFilters.due);
+  const [dateFrom, setDateFrom] = useState(initialFilters.dateFrom);
+  const [dateTo, setDateTo] = useState(initialFilters.dateTo);
+  const [sort, setSort] = useState<SortMode>(initialFilters.sort);
+  const [page, setPage] = useState(initialFilters.page);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [detailHeight, setDetailHeight] = useState<number | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [renderedReportId, setRenderedReportId] = useState<string | null>(null);
 
+  const tableCardRef = useRef<HTMLDivElement>(null);
   const now = useMemo(() => new Date(renderedAt), [renderedAt]);
-  const activeTechnicians = useMemo(() => technicians.filter((technician) => technician.active), [technicians]);
-  const normalizedQuery = normalize(query);
 
   const enrichedIncidents = useMemo<IncidentListItem[]>(
     () =>
       incidents.map((incident) => {
-        const technician = technicianLabel(activeTechnicians, incident.assigned_to);
+        const assignedTechnician = findTechnician(technicians, incident.assigned_to);
+        const technician = assignedTechnician ? technicianName(assignedTechnician) : technicianLabel(technicians, incident.assigned_to);
         const location = formatLocation(incident.reports);
         const statusValue = incident.reports?.status ?? "classified";
-        const haystack = normalize(
-          [
-            incident.report_id,
-            incident.reports?.title,
-            incident.reports?.description,
-            statusValue,
-            incident.category,
-            categoryLabel(incident.category),
-            incident.urgency,
-            location,
-            technician,
-            incident.reports?.classification_reason,
-          ].join(" "),
-        );
 
         return {
           incident,
+          assignedTechnician,
           technician,
           location,
           status: statusValue,
-          haystack,
           dueState: dueState(incident.due_at, now),
-          priority: incidentPriority(incident, now),
         };
       }),
-    [activeTechnicians, incidents, now],
+    [incidents, now, technicians],
   );
 
-  const filteredIncidents = useMemo(() => {
-    return enrichedIncidents
-      .filter((item) => {
-        if (normalizedQuery && !item.haystack.includes(normalizedQuery)) return false;
-        if (status !== "all" && item.status !== status) return false;
-        if (urgency !== "all" && item.incident.urgency !== urgency) return false;
-        if (category !== "all" && item.incident.category !== category) return false;
-        if (assignment === "assigned" && !item.incident.assigned_to) return false;
-        if (assignment === "unassigned" && item.incident.assigned_to) return false;
-        if (due !== "all" && item.dueState !== due) return false;
-        return true;
-      })
-      .sort((left, right) => sortIncidents(left, right, sort));
-  }, [assignment, category, due, enrichedIncidents, normalizedQuery, sort, status, urgency]);
+  const currentPage = Math.min(page, pageCount);
+  const selectedItem = selectedReportId
+    ? enrichedIncidents.find((item) => item.incident.report_id === selectedReportId) ?? null
+    : null;
+  const detailOpen = Boolean(selectedItem);
+  const renderedItem = selectedItem ?? (renderedReportId
+    ? enrichedIncidents.find((item) => item.incident.report_id === renderedReportId) ?? null
+    : null);
+  const selectedId = selectedItem?.incident.report_id ?? null;
+  const filterCount = [
+    status !== "all",
+    urgency !== "all",
+    category !== "all",
+    assignment !== "all",
+    due !== "all",
+    Boolean(dateFrom),
+    Boolean(dateTo),
+    sort !== "priority",
+  ].filter(Boolean).length;
+  const hasFilters = Boolean(query || filterCount);
 
-  const selectedItem = filteredIncidents.find((item) => item.incident.report_id === selectedReportId) ?? filteredIncidents[0];
-  const selectedId = selectedItem?.incident.report_id;
-  const openIncidents = incidents.filter((incident) => openStatuses.has(incident.reports?.status ?? "classified"));
-  const criticalIncidents = openIncidents.filter((incident) => incident.urgency === "critical");
-  const unassignedIncidents = openIncidents.filter((incident) => !incident.assigned_to);
-  const overdueIncidents = openIncidents.filter((incident) => dueState(incident.due_at, now) === "overdue");
-  const hasFilters = Boolean(
-    query ||
-      status !== "all" ||
-      urgency !== "all" ||
-      category !== "all" ||
-      assignment !== "all" ||
-      due !== "all" ||
-      sort !== "priority",
-  );
+  useEffect(() => {
+    const node = tableCardRef.current;
+    if (!node) return;
+
+    let frame = 0;
+    const updateDetailHeight = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = node.getBoundingClientRect();
+        const availableHeight = Math.max(0, window.innerHeight - rect.top - 32);
+        const nextHeight = Math.max(rect.height, availableHeight);
+
+        setDetailHeight((currentHeight) => {
+          if (currentHeight !== null && Math.abs(currentHeight - nextHeight) < 1) {
+            return currentHeight;
+          }
+          return nextHeight;
+        });
+      });
+    };
+
+    const observer = new ResizeObserver(updateDetailHeight);
+    observer.observe(node);
+    window.addEventListener("resize", updateDetailHeight);
+    updateDetailHeight();
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", updateDetailHeight);
+    };
+  }, []);
+
+  useEffect(() => {
+    const cleanQuery = query.trim();
+    if (cleanQuery === initialFilters.query.trim()) return;
+
+    const timeout = window.setTimeout(() => {
+      setPage(1);
+      setSelectedReportId(null);
+      router.replace(
+        incidentHref({
+          query: cleanQuery,
+          status,
+          urgency,
+          category,
+          assignment,
+          due,
+          dateFrom,
+          dateTo,
+          sort,
+          page: 1,
+        }),
+        { scroll: false },
+      );
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    assignment,
+    category,
+    dateFrom,
+    dateTo,
+    due,
+    initialFilters.query,
+    query,
+    router,
+    sort,
+    status,
+    urgency,
+  ]);
+
+  function currentFilters(nextPage = page): IncidentFiltersState {
+    return { query, status, urgency, category, assignment, due, dateFrom, dateTo, sort, page: nextPage };
+  }
+
+  function applyFilters(patch: Partial<IncidentFiltersState>, nextPage = 1) {
+    const nextFilters = { ...currentFilters(), ...patch, page: nextPage };
+    setQuery(nextFilters.query);
+    setStatus(nextFilters.status);
+    setUrgency(nextFilters.urgency);
+    setCategory(nextFilters.category);
+    setAssignment(nextFilters.assignment);
+    setDue(nextFilters.due);
+    setDateFrom(nextFilters.dateFrom);
+    setDateTo(nextFilters.dateTo);
+    setSort(nextFilters.sort);
+    setPage(nextFilters.page);
+    setSelectedReportId(null);
+    router.replace(incidentHref(nextFilters), { scroll: false });
+    setFiltersOpen(true);
+  }
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    applyFilters({ query });
+    setFiltersOpen(false);
+  }
 
   function clearFilters() {
-    setQuery("");
-    setStatus("all");
-    setUrgency("all");
-    setCategory("all");
-    setAssignment("all");
-    setDue("all");
-    setSort("priority");
+    applyFilters({
+      query: "",
+      status: "all",
+      urgency: "all",
+      category: "all",
+      assignment: "all",
+      due: "all",
+      dateFrom: "",
+      dateTo: "",
+      sort: "priority",
+    });
+    setFiltersOpen(false);
+  }
+
+  function changePage(nextPage: number) {
+    const safePage = Math.min(Math.max(nextPage, 1), pageCount);
+    setPage(safePage);
+    setSelectedReportId(null);
+    router.replace(incidentHref(currentFilters(safePage)), { scroll: false });
+  }
+
+  function toggleIncidentSelection(reportId: string) {
+    if (selectedReportId === reportId) {
+      setSelectedReportId(null);
+      return;
+    }
+
+    setRenderedReportId(reportId);
+    setSelectedReportId(reportId);
+  }
+
+  function handleResultsTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.propertyName !== "grid-template-columns") return;
+    if (!detailOpen) setRenderedReportId(null);
   }
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
-      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">Mantenimiento</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">Incidencias</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            CRM operativo para revisar, filtrar y actualizar reportes de mantenimiento desde el detalle.
-          </p>
-        </div>
+      <div className="border-b border-border pb-5">
+        <h1 className="text-xl font-semibold tracking-tight">Incidencias</h1>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          Revisa reportes de mantenimiento, selecciona una fila y actualiza el detalle técnico sin salir de la tabla.
+        </p>
+      </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Abiertas" value={openIncidents.length} icon={AlertTriangle} />
-          <MetricCard label="Críticas" value={criticalIncidents.length} icon={Clock3} />
-          <MetricCard label="Sin técnico" value={unassignedIncidents.length} icon={Wrench} />
-          <MetricCard label="Vencidas" value={overdueIncidents.length} icon={CalendarClock} />
-        </div>
-      </header>
+      <div className="space-y-3">
+        <section className="space-y-3">
+          <form onSubmit={handleSearchSubmit} className="grid gap-2 lg:grid-cols-[minmax(320px,520px)_1fr_auto_auto] lg:items-center">
+          <SearchControl
+            value={query}
+            onChange={setQuery}
+          />
 
-      <section className="space-y-3">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por título, ubicación, técnico, categoría o ID..."
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-foreground outline-none transition focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10"
-            />
-          </div>
+          <div className="hidden lg:block" />
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <SelectControl value={status} onChange={setStatus} options={[["all", "Estado"], ...statusOptions]} />
-            <SelectControl value={urgency} onChange={setUrgency} options={[["all", "Urgencia"], ...urgencyOptions]} />
-            <SelectControl value={category} onChange={setCategory} options={[["all", "Categoría"], ...categoryOptions]} />
-            <SelectControl
-              value={assignment}
-              onChange={(value) => setAssignment(value as AssignmentFilter)}
-              options={[
-                ["all", "Asignación"],
-                ["assigned", "Asignadas"],
-                ["unassigned", "Sin técnico"],
-              ]}
-            />
-            <SelectControl
-              value={due}
-              onChange={(value) => setDue(value as DueFilter)}
-              options={[
-                ["all", "SLA"],
-                ["overdue", "Vencidas"],
-                ["today", "Por vencer"],
-                ["none", "Sin fecha"],
-              ]}
-            />
-            <SelectControl
-              value={sort}
-              onChange={(value) => setSort(value as SortMode)}
-              options={[
-                ["priority", "Prioridad"],
-                ["newest", "Recientes"],
-                ["oldest", "Antiguas"],
-                ["due", "SLA próximo"],
-              ]}
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-          <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <SlidersHorizontal className="size-4" />
-            <span>
-              {filteredIncidents.length} de {incidents.length} incidencias visibles
-            </span>
-          </div>
-          {hasFilters && (
-            <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
-              <FilterX className="size-3.5" />
-              Limpiar filtros
-            </Button>
-          )}
-        </div>
-      </section>
-
-      {filteredIncidents.length === 0 ? (
-        <section className="overflow-hidden rounded-[1.75rem] border border-[#e7f0f2] bg-white/90">
-          <EmptyState hasIncidents={incidents.length > 0} onClear={clearFilters} />
-        </section>
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="overflow-hidden rounded-[1.75rem] border border-[#e7f0f2] bg-white/90">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-              <div>
-                <h2 className="text-base font-semibold tracking-tight">Lista de incidencias</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Tabla informativa. Selecciona una fila para editar en el detalle.</p>
+          <DropdownMenu open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={`h-9 border-border bg-secondary hover:bg-secondary/80 ${filterCount > 0 ? "text-foreground" : ""}`}
+                />
+              }
+            >
+              <SlidersHorizontal className="size-3.5" />
+              Filtros
+              {filterCount > 0 && (
+                <span className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold leading-none text-primary-foreground">
+                  {filterCount}
+                </span>
+              )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              sideOffset={8}
+              className="!w-[440px] max-w-[calc(100vw_-_2rem)] p-4"
+            >
+              <div className="grid gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold tracking-tight">Filtros de incidencias</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Ajusta estado, prioridad, asignación, SLA y rango de fecha.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <SelectControl
+                    value={status}
+                    onChange={(value) => applyFilters({ status: value })}
+                    options={[["all", "Estado"], ...statusOptions]}
+                  />
+                  <SelectControl
+                    value={urgency}
+                    onChange={(value) => applyFilters({ urgency: value })}
+                    options={[["all", "Urgencia"], ...urgencyOptions]}
+                  />
+                  <SelectControl
+                    value={category}
+                    onChange={(value) => applyFilters({ category: value })}
+                    options={[["all", "Categoría"], ...categoryOptions]}
+                  />
+                  <SelectControl
+                    value={assignment}
+                    onChange={(value) => applyFilters({ assignment: value as AssignmentFilter })}
+                    options={[
+                      ["all", "Asignación"],
+                      ["assigned", "Asignadas"],
+                      ["unassigned", "Sin técnico"],
+                    ]}
+                  />
+                  <SelectControl
+                    value={due}
+                    onChange={(value) => applyFilters({ due: value as DueFilter })}
+                    options={[
+                      ["all", "SLA"],
+                      ["overdue", "Vencidas"],
+                      ["today", "Por vencer"],
+                      ["none", "Sin fecha"],
+                    ]}
+                  />
+                  <SelectControl
+                    value={sort}
+                    onChange={(value) => applyFilters({ sort: value as SortMode })}
+                    inactiveValue="priority"
+                    options={[
+                      ["priority", "Prioridad"],
+                      ["newest", "Recientes"],
+                      ["oldest", "Antiguas"],
+                      ["due", "SLA próximo"],
+                    ]}
+                  />
+                  <DateControl
+                    label="Desde"
+                    value={dateFrom}
+                    onChange={(value) => applyFilters({ dateFrom: value })}
+                  />
+                  <DateControl
+                    label="Hasta"
+                    value={dateTo}
+                    onChange={(value) => applyFilters({ dateTo: value })}
+                  />
+                </div>
               </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-muted-foreground">
-                {filteredIncidents.length} registros
-              </span>
-            </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/80 text-left text-xs font-medium text-muted-foreground">
-                    <th className="px-4 py-2.5">Reporte</th>
-                    <th className="px-2.5 py-2.5">Incidencia</th>
-                    <th className="px-2.5 py-2.5">Ubicación</th>
-                    <th className="px-2.5 py-2.5">Estado</th>
-                    <th className="px-2.5 py-2.5">Urgencia</th>
-                    <th className="px-2.5 py-2.5">Categoría</th>
-                    <th className="px-2.5 py-2.5">Técnico</th>
-                    <th className="px-2.5 py-2.5">SLA</th>
-                    <th className="px-2.5 py-2.5">IA</th>
-                    <th className="px-4 py-2.5 text-right">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredIncidents.map((item) => (
-                    <IncidentRow
-                      key={item.incident.report_id}
-                      item={item}
-                      now={now}
-                      selected={item.incident.report_id === selectedId}
-                      onSelect={() => setSelectedReportId(item.incident.report_id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={clearFilters}
+            disabled={!hasFilters}
+            className="h-9 border-border bg-secondary hover:bg-secondary/80 [&:disabled]:cursor-default [&:disabled]:pointer-events-auto"
+          >
+            <FilterX className="size-3.5" />
+            Limpiar
+          </Button>
+        </form>
+        </section>
 
-          {selectedItem && (
-            <IncidentDetail item={selectedItem} technicians={activeTechnicians} now={now} />
+        {totalItems === 0 ? (
+        <Card className="gap-0 border-border py-0">
+          <CardContent className="px-0 pt-0">
+            <EmptyState hasIncidents={allItemsCount > 0} />
+          </CardContent>
+        </Card>
+      ) : (
+        <div
+          className="grid items-start gap-y-4 transition-[grid-template-columns,column-gap] duration-200 ease-out xl:grid-cols-[minmax(0,1fr)_var(--incident-detail-width)] xl:[column-gap:var(--incident-detail-gap)]"
+          onTransitionEnd={handleResultsTransitionEnd}
+          style={
+            {
+              "--incident-detail-width": detailOpen ? "390px" : "0px",
+              "--incident-detail-gap": detailOpen ? "1rem" : "0rem",
+            } as CSSProperties
+          }
+        >
+          <Card ref={tableCardRef} className="gap-0 border-border py-0 xl:self-start">
+            <CardContent className="px-0 pt-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[740px] text-left text-sm">
+                  <thead className="border-b border-border bg-muted/45 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2.5 font-medium">Incidencia</th>
+                      <th className="px-3 py-2.5 font-medium">Estado</th>
+                      <th className="px-3 py-2.5 font-medium">Urgencia</th>
+                      <th className="px-4 py-2.5 font-medium">Técnico</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {enrichedIncidents.map((item) => (
+                      <IncidentTableRow
+                        key={item.incident.report_id}
+                        item={item}
+                        selected={item.incident.report_id === selectedId}
+                        onSelect={() => toggleIncidentSelection(item.incident.report_id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationControls
+                page={currentPage}
+                pageCount={pageCount}
+                pageSize={pageSize}
+                totalItems={totalItems}
+                onPageChange={changePage}
+              />
+            </CardContent>
+          </Card>
+
+          {renderedItem && (
+            <div className="min-w-0 overflow-hidden xl:self-start">
+              <div className="xl:w-[390px]">
+                <IncidentDetail
+                  key={renderedItem.incident.report_id}
+                  item={renderedItem}
+                  technicians={technicians}
+                  now={now}
+                  height={detailHeight}
+                />
+              </div>
+            </div>
           )}
         </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
-function IncidentRow({
+function IncidentTableRow({
   item,
-  now,
   selected,
   onSelect,
 }: {
   item: IncidentListItem;
-  now: Date;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const { incident, technician, location, status, dueState: due } = item;
-  const confidence = Math.round(Number(incident.reports?.ai_confidence ?? 0) * 100);
+  const { incident, assignedTechnician, technician, location, status } = item;
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect();
+    }
+  }
 
   return (
     <tr
+      tabIndex={0}
+      aria-selected={selected}
       onClick={onSelect}
-      className={`cursor-pointer bg-white transition hover:bg-slate-50/90 ${selected ? "bg-primary/5" : ""}`}
+      onKeyDown={handleKeyDown}
+      className={`cursor-pointer outline-none transition-colors ${
+        selected
+          ? "bg-primary/10 hover:bg-primary/10 focus-visible:bg-primary/10"
+          : "bg-white hover:bg-muted/35 focus-visible:bg-muted/45"
+      }`}
     >
-      <td className="px-4 py-2.5 align-middle">
-        <button type="button" onClick={onSelect} className="text-left font-mono text-xs font-medium text-slate-500 hover:text-primary">
-          {shortId(incident.report_id)}
-        </button>
-        <div className="mt-1 text-xs text-muted-foreground">{formatDateTime(incident.created_at)}</div>
-      </td>
-      <td className="max-w-[300px] px-2.5 py-2.5 align-middle">
-        <div className="flex items-start gap-2.5">
-          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-muted-foreground">
-            {incident.reports?.photo_url ? <ImageIcon className="size-5" /> : <AlertTriangle className="size-5" />}
+      <td className="px-4 py-3 align-middle">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className={`relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border ${urgencyIconClass(incident.urgency)}`}>
+            {incident.reports?.photo_url ? (
+              <Image
+                src={incident.reports.photo_url}
+                alt={incident.reports.title ?? "Foto de la incidencia"}
+                fill
+                sizes="40px"
+                className="object-cover"
+              />
+            ) : (
+              <AlertTriangle className="size-4" />
+            )}
           </div>
           <div className="min-w-0">
             <p className="truncate font-medium text-foreground">{incident.reports?.title ?? "Incidencia sin título"}</p>
-            <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-              {incident.reports?.description || "Sin descripción registrada."}
-            </p>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <MapPin className="size-3.5 shrink-0" />
+              <span className="truncate">{location}</span>
+            </div>
+
           </div>
         </div>
       </td>
-      <td className="max-w-[180px] px-2.5 py-2.5 align-middle">
-        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-          <MapPin className="size-4 shrink-0" />
-          <span className="truncate">{location}</span>
-        </div>
-      </td>
-      <td className="px-2.5 py-2.5 align-middle">
+      <td className="px-3 py-3 align-middle">
         <Badge value={status} />
       </td>
-      <td className="px-2.5 py-2.5 align-middle">
-        <Badge value={incident.urgency} />
+      <td className="px-3 py-3 align-middle">
+        <UrgencyBadge value={incident.urgency} />
       </td>
-      <td className="px-2.5 py-2.5 align-middle text-sm text-muted-foreground">{categoryLabel(incident.category)}</td>
-      <td className="max-w-[160px] px-2.5 py-2.5 align-middle">
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <UserRoundCheck className="size-3.5 shrink-0" />
-          <span className="truncate">{technician}</span>
-        </div>
-      </td>
-      <td className="px-2.5 py-2.5 align-middle">
-        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${dueBadgeClass(due)}`}>
-          {dueLabel(due)}{incident.due_at ? `, ${relativeDueLabel(incident.due_at, now)}` : ""}
-        </span>
-      </td>
-      <td className="px-2.5 py-2.5 align-middle">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="size-4 text-emerald-600" />
-          <span className="font-medium tabular-nums">{confidence}%</span>
-        </div>
-      </td>
-      <td className="px-4 py-2.5 text-right align-middle">
-        <Button type="button" variant={selected ? "default" : "outline"} size="sm" onClick={onSelect}>
-          Detalle
-        </Button>
+      <td className="max-w-[170px] px-4 py-3 align-middle">
+        <TechnicianInline technician={assignedTechnician} fallbackName={technician} />
       </td>
     </tr>
   );
 }
 
-function IncidentDetail({ item, technicians, now }: { item: IncidentListItem; technicians: Technician[]; now: Date }) {
-  const { incident, technician, location, status, dueState: due } = item;
-  const confidence = Math.round(Number(incident.reports?.ai_confidence ?? 0) * 100);
+function IncidentDetail({
+  item,
+  technicians,
+  now,
+  height,
+}: {
+  item: IncidentListItem;
+  technicians: Technician[];
+  now: Date;
+  height: number | null;
+}) {
+  const { incident, assignedTechnician, technician, location, status, dueState: due } = item;
+  const report = incident.reports;
+  const confidence = confidenceValue(incident);
 
   return (
-    <aside className="rounded-[1.75rem] border border-[#e7f0f2] bg-white/90 xl:sticky xl:top-6 xl:self-start">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Detalle editable</p>
-        <h2 className="mt-2 text-lg font-semibold tracking-tight">{incident.reports?.title ?? "Incidencia sin título"}</h2>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">{incident.report_id}</p>
-      </div>
-
-      <div className="space-y-5 p-5">
-        <div className="space-y-3 text-sm">
-          <InfoLine label="Descripción" value={incident.reports?.description || "Sin descripción registrada."} />
-          <InfoLine label="Ubicación" value={location} />
-          <InfoLine label="Técnico actual" value={technician} />
-          <InfoLine label="Clasificación" value={incident.reports?.classification_reason ?? "Sin clasificación"} />
-          <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="Estado" value={statusLabel(status)} />
-            <MiniStat label="Urgencia" value={statusLabel(incident.urgency)} />
-            <MiniStat label="SLA" value={dueLabel(due)} />
-            <MiniStat label="IA" value={`${confidence}%`} />
+    <Card
+      className="gap-0 border-border py-0 xl:max-h-[var(--incident-detail-height)] xl:min-h-0 xl:self-start xl:overflow-y-auto xl:overscroll-contain"
+      style={height ? ({ "--incident-detail-height": `${height}px` } as CSSProperties) : undefined}
+    >
+      <div className="border-b border-border px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">Detalle</p>
+            <h2 className="mt-1 line-clamp-2 text-base leading-snug font-semibold tracking-tight">
+              {report?.title ?? "Incidencia sin título"}
+            </h2>
           </div>
-          <div className="grid gap-2 text-xs text-muted-foreground">
-            <p>Creado: {formatDateTime(incident.created_at)}</p>
-            <p>Actualizado: {formatDateTime(incident.updated_at)}</p>
-            <p>Completado: {incident.completed_at ? formatDateTime(incident.completed_at) : "Pendiente"}</p>
-            {incident.due_at && <p>Vence: {formatDateTime(incident.due_at)} ({relativeDueLabel(incident.due_at, now)})</p>}
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <Badge value={status} />
+            <UrgencyBadge value={incident.urgency} />
           </div>
-          {incident.reports?.photo_url && (
-            <a
-              href={incident.reports.photo_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
-            >
-              <ImageIcon className="size-4" />
-              Ver foto del reporte
-            </a>
-          )}
         </div>
-
-        <form action={updateMaintenanceAction} className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-          <input type="hidden" name="report_id" value={incident.report_id} />
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold">Editar incidencia</p>
-              <p className="mt-1 text-xs text-muted-foreground">Los cambios se guardan solo para este reporte.</p>
-            </div>
-            <Wrench className="size-4 text-muted-foreground" />
-          </div>
-
-          <FieldSelect label="Estado" name="status" defaultValue={status} options={statusOptions} />
-          <FieldSelect label="Urgencia" name="urgency" defaultValue={incident.urgency} options={urgencyOptions} />
-          <FieldSelect label="Categoría" name="category" defaultValue={incident.category} options={categoryOptions} />
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-            Técnico
-            <select
-              name="assigned_to"
-              defaultValue={incident.assigned_to ?? ""}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-            >
-              <option value="">Sin asignar</option>
-              {technicians.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {technicianName(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-            Vence
-            <input
-              type="datetime-local"
-              name="due_at"
-              defaultValue={dateTimeLocalValue(incident.due_at)}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-            />
-          </label>
-          <Button type="submit" className="w-full">
-            Guardar cambios
-          </Button>
-        </form>
+        <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+          {report?.description || "Sin descripción registrada."}
+        </p>
       </div>
-    </aside>
+
+      <CardContent className="space-y-4 p-4">
+        <IncidentMedia incident={incident} />
+        <IncidentSummary incident={incident} status={status} due={due} confidence={confidence} />
+        <LocationAndAssignment
+          incident={incident}
+          location={location}
+          technician={assignedTechnician}
+          technicianName={technician}
+        />
+        <DetailSection title="Notas">
+          <div className="space-y-3 rounded-xl border border-border bg-muted/25 p-3">
+            <DetailNote label="Descripción" value={report?.description || "Sin descripción registrada."} />
+            <DetailNote label="Clasificación" value={report?.classification_reason || "Sin clasificación registrada."} />
+          </div>
+        </DetailSection>
+        <ActivityTimeline
+          createdAt={incident.created_at}
+          updatedAt={incident.updated_at}
+          dueAt={incident.due_at}
+          completedAt={incident.completed_at}
+          now={now}
+        />
+        <UpdateIncidentForm incident={incident} status={status} technicians={technicians} />
+      </CardContent>
+    </Card>
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  icon: Icon,
+function PaginationControls({
+  page,
+  pageCount,
+  pageSize,
+  totalItems,
+  onPageChange,
 }: {
-  label: string;
-  value: number;
-  icon: ComponentType<{ className?: string }>;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
 }) {
+  if (pageCount <= 1) return null;
+
+  const firstItem = (page - 1) * pageSize + 1;
+  const lastItem = Math.min(page * pageSize, totalItems);
+
   return (
-    <div className="min-w-28 px-1 py-1">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Icon className="size-4 text-primary" />
-        <span>{label}</span>
+    <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs text-muted-foreground">
+        Mostrando {firstItem}-{lastItem} de {totalItems}
+      </p>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          className="h-8 min-w-8 border-border bg-secondary hover:bg-secondary/80"
+        >
+          {"<"}
+        </Button>
+        {paginationPages(page, pageCount).map((pageItem, index) =>
+          pageItem === "ellipsis" ? (
+            <span key={`ellipsis-${index}`} className="inline-flex h-8 min-w-8 items-center justify-center text-sm font-medium text-muted-foreground">
+              ...
+            </span>
+          ) : (
+            <Button
+              key={pageItem}
+              type="button"
+              variant="secondary"
+              onClick={() => onPageChange(pageItem)}
+              className={`h-8 min-w-8 ${pageItem === page ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15" : "border-border bg-secondary hover:bg-secondary/80"}`}
+            >
+              {pageItem}
+            </Button>
+          ),
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          className="h-8 min-w-8 border-border bg-secondary hover:bg-secondary/80"
+        >
+          {">"}
+        </Button>
       </div>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function paginationPages(page: number, pageCount: number): Array<number | "ellipsis"> {
+  if (pageCount <= 5) return Array.from({ length: pageCount }, (_, index) => index + 1);
+
+  const pages = new Set([1, 2, page, pageCount - 1, pageCount]);
+  const visiblePages = Array.from(pages)
+    .filter((pageNumber) => pageNumber >= 1 && pageNumber <= pageCount)
+    .sort((left, right) => left - right);
+
+  return visiblePages.flatMap((pageNumber, index) => {
+    const previous = visiblePages[index - 1];
+    return previous && pageNumber - previous > 1 ? ["ellipsis", pageNumber] : [pageNumber];
+  });
+}
+
+function SearchControl({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="relative min-w-0">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Buscar por título, ubicación, técnico, categoría o ID"
+        className="h-9 w-full rounded-lg border border-input bg-white pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+      />
     </div>
   );
 }
@@ -491,16 +733,27 @@ function SelectControl({
   value,
   onChange,
   options,
+  inactiveValue = "all",
 }: {
   value: string;
   onChange: (value: string) => void;
   options: Option[];
+  inactiveValue?: string;
 }) {
+  const active = value !== inactiveValue;
+
+  function stopMenuPropagation(event: MouseEvent<HTMLSelectElement>) {
+    event.stopPropagation();
+  }
+
   return (
     <select
       value={value}
+      onClick={stopMenuPropagation}
       onChange={(event) => onChange(event.target.value)}
-      className="h-12 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-foreground outline-none transition focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10"
+      className={`h-9 w-full rounded-lg border border-input bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 ${
+        active ? "text-foreground" : "text-muted-foreground"
+      }`}
     >
       {options.map(([optionValue, optionLabel]) => (
         <option key={optionValue} value={optionValue}>
@@ -511,24 +764,243 @@ function SelectControl({
   );
 }
 
+function DateControl({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="relative block">
+      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+        {label}
+      </span>
+      <input
+        type="date"
+        value={value}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => onChange(event.target.value)}
+        className={`h-9 w-full rounded-lg border border-input bg-white pl-12 pr-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 ${
+          value ? "text-foreground" : "text-muted-foreground"
+        }`}
+      />
+    </label>
+  );
+}
+
+function IncidentMedia({ incident }: { incident: MaintenanceIncident }) {
+  const photoUrl = incident.reports?.photo_url;
+
+  if (!photoUrl) return null;
+
+  return (
+    <a
+      href={photoUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="relative block aspect-[16/10] overflow-hidden rounded-xl border border-border bg-muted"
+    >
+      <Image
+        src={photoUrl}
+        alt={incident.reports?.title ?? "Foto de la incidencia"}
+        fill
+        sizes="390px"
+        className="object-cover"
+      />
+    </a>
+  );
+}
+
+function IncidentSummary({
+  incident,
+  status,
+  due,
+  confidence,
+}: {
+  incident: MaintenanceIncident;
+  status: string;
+  due: DueState;
+  confidence: number;
+}) {
+  return (
+    <DetailSection title="Resumen">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-muted/25 p-3">
+        <DetailField label="Estado" value={statusLabel(status)} />
+        <DetailField label="Urgencia" value={statusLabel(incident.urgency)} />
+        <DetailField label="Categoría" value={categoryLabel(incident.category)} />
+        <DetailField label="SLA" value={dueLabel(due)} />
+        <DetailField label="Confianza" value={`${confidence}%`} />
+        <DetailField label="Reporte" value={shortReportId(incident.report_id)} />
+      </div>
+    </DetailSection>
+  );
+}
+
+function LocationAndAssignment({
+  incident,
+  location,
+  technician,
+  technicianName,
+}: {
+  incident: MaintenanceIncident;
+  location: string;
+  technician: Technician | null;
+  technicianName: string;
+}) {
+  const zone = incident.reports?.campus_zones;
+
+  return (
+    <DetailSection title="Ubicación y asignación">
+      <div className="divide-y divide-border rounded-xl border border-border bg-muted/25">
+        <DetailRow label="Ubicación" value={location} />
+        {zone && <DetailRow label="Edificio" value={zone.building} />}
+        {zone?.floor && <DetailRow label="Piso" value={zone.floor} />}
+        <DetailRow label="Técnico" value={technician ? technicianName : "Sin técnico asignado"} />
+        {technician?.profiles?.email && <DetailRow label="Contacto" value={technician.profiles.email} />}
+      </div>
+    </DetailSection>
+  );
+}
+
+function ActivityTimeline({
+  createdAt,
+  updatedAt,
+  dueAt,
+  completedAt,
+  now,
+}: {
+  createdAt: string;
+  updatedAt: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  now: Date;
+}) {
+  return (
+    <DetailSection title="Actividad">
+      <div className="divide-y divide-border rounded-xl border border-border bg-muted/25">
+        <DetailRow label="Creado" value={formatDateTime(createdAt)} />
+        <DetailRow label="Actualizado" value={formatDateTime(updatedAt)} />
+        <DetailRow
+          label="Vence"
+          value={dueAt ? `${formatDateTime(dueAt)}, ${relativeDueLabel(dueAt, now)}` : "Sin fecha definida"}
+        />
+        <DetailRow label="Cierre" value={completedAt ? formatDateTime(completedAt) : "Pendiente"} />
+      </div>
+    </DetailSection>
+  );
+}
+
+function UpdateIncidentForm({
+  incident,
+  status,
+  technicians,
+}: {
+  incident: MaintenanceIncident;
+  status: string;
+  technicians: Technician[];
+}) {
+  return (
+    <DetailSection title="Actualizar">
+      <form action={updateMaintenanceAction} className="space-y-3 rounded-xl border border-border bg-muted/25 p-3">
+        <input type="hidden" name="report_id" value={incident.report_id} />
+        <div className="grid grid-cols-2 gap-2">
+          <FieldSelect label="Estado" name="status" defaultValue={status} options={statusOptions} />
+          <FieldSelect label="Urgencia" name="urgency" defaultValue={incident.urgency} options={urgencyOptions} />
+          <FieldSelect className="col-span-2" label="Categoría" name="category" defaultValue={incident.category} options={categoryOptions} />
+        </div>
+        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+          <span>Técnico</span>
+          <select
+            name="assigned_to"
+            defaultValue={incident.assigned_to ?? ""}
+            className="h-9 rounded-lg border border-input bg-white px-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          >
+            <option value="">Sin asignar</option>
+            {technicians.map((item) => (
+              <option key={item.id} value={item.id}>
+                {technicianName(item)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+          <span>Vence</span>
+          <input
+            type="datetime-local"
+            name="due_at"
+            defaultValue={dateTimeLocalValue(incident.due_at)}
+            className="h-9 rounded-lg border border-input bg-white px-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </label>
+        <Button type="submit" className="h-9 w-full">
+          Guardar cambios
+        </Button>
+      </form>
+    </DetailSection>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2.5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-3 px-3 py-2.5 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function DetailNote({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm leading-6 text-foreground">{value}</p>
+    </div>
+  );
+}
+
 function FieldSelect({
   label,
   name,
   defaultValue,
   options,
+  className = "",
 }: {
   label: string;
   name: string;
   defaultValue: string;
   options: Option[];
+  className?: string;
 }) {
   return (
-    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-      {label}
+    <label className={`grid gap-1.5 text-xs font-medium text-muted-foreground ${className}`}>
+      <span>{label}</span>
       <select
         name={name}
         defaultValue={defaultValue}
-        className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+        className="h-9 rounded-lg border border-input bg-white px-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
       >
         {options.map(([value, optionLabel]) => (
           <option key={value} value={value}>
@@ -540,28 +1012,44 @@ function FieldSelect({
   );
 }
 
-function InfoLine({ label, value }: { label: string; value: string }) {
+function TechnicianInline({ technician, fallbackName }: { technician: Technician | null; fallbackName: string }) {
+  if (!technician) {
+    return <span className="text-muted-foreground">{fallbackName}</span>;
+  }
+
   return (
-    <div>
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 leading-6 text-foreground">{value}</p>
+    <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+      <TechnicianAvatar technician={technician} fallbackName={fallbackName} size="sm" />
+      <span className="truncate">{fallbackName}</span>
     </div>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function TechnicianAvatar({
+  technician,
+  fallbackName,
+  size,
+}: {
+  technician: Technician | null;
+  fallbackName: string;
+  size: "sm" | "md";
+}) {
+  const initials = initialsFromName(fallbackName);
+
   return (
-    <div className="rounded-xl border border-slate-100 bg-white p-3">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate text-sm font-medium">{value}</p>
-    </div>
+    <UiAvatar className={size === "md" ? "size-10" : "size-7"}>
+      {technician?.profiles?.avatar_url && <AvatarImage src={technician.profiles.avatar_url} alt={fallbackName} />}
+      <AvatarFallback className={`${size === "md" ? "text-sm" : "text-xs"} font-semibold text-primary`}>
+        {initials}
+      </AvatarFallback>
+    </UiAvatar>
   );
 }
 
-function EmptyState({ hasIncidents, onClear }: { hasIncidents: boolean; onClear: () => void }) {
+function EmptyState({ hasIncidents }: { hasIncidents: boolean }) {
   return (
     <div className="px-5 py-14 text-center">
-      <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-muted-foreground">
+      <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Search className="size-5" />
       </div>
       <h3 className="mt-4 text-sm font-semibold">
@@ -569,31 +1057,47 @@ function EmptyState({ hasIncidents, onClear }: { hasIncidents: boolean; onClear:
       </h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
         {hasIncidents
-          ? "Prueba con otro texto o limpia los filtros para volver a ver toda la tabla."
+          ? "Prueba con otro texto o ajusta los filtros para volver a ver la tabla."
           : "Cuando se registren reportes de mantenimiento aparecerán en este tablero."}
       </p>
-      {hasIncidents && (
-        <Button type="button" variant="outline" className="mt-4" onClick={onClear}>
-          Limpiar filtros
-        </Button>
-      )}
     </div>
   );
 }
 
 function Badge({ value }: { value: string }) {
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${badgeClass(value)}`}>{statusLabel(value)}</span>;
+  return <span className={`inline-flex rounded-lg px-2 py-1 text-xs font-medium ${incidentStatusBadgeClass(value)}`}>{statusLabel(value)}</span>;
+}
+
+function UrgencyBadge({ value }: { value: string }) {
+  return <span className={`inline-flex rounded-lg px-2 py-1 text-xs font-medium ${urgencyBadgeClass(value)}`}>{statusLabel(value)}</span>;
 }
 
 function technicianLabel(technicians: Technician[], technicianId: string | null) {
-  if (!technicianId) return "Sin asignar";
-  const technician = technicians.find((item) => item.id === technicianId);
+  if (!technicianId) return "-";
+  const technician = findTechnician(technicians, technicianId);
   return technician ? technicianName(technician) : technicianId;
 }
 
 function technicianName(technician: Technician) {
   return technician.profiles?.full_name || technician.profiles?.email || technician.id;
 }
+
+function findTechnician(technicians: Technician[], technicianId: string | null) {
+  if (!technicianId) return null;
+  return technicians.find((item) => item.id === technicianId) ?? null;
+}
+
+function initialsFromName(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "T"
+  );
+}
+
 
 function categoryLabel(value: string) {
   return categoryOptions.find(([optionValue]) => optionValue === value)?.[1] ?? value;
@@ -643,15 +1147,28 @@ function dueState(value: string | null, now: Date): DueState {
 function dueLabel(value: DueState) {
   if (value === "overdue") return "Vencida";
   if (value === "today") return "Por vencer";
-  if (value === "none") return "Sin SLA";
+  if (value === "none") return "-";
   return "En plazo";
 }
 
-function dueBadgeClass(value: DueState) {
-  if (value === "overdue") return "bg-destructive/10 text-destructive";
-  if (value === "today") return "bg-amber-500/10 text-amber-700";
-  if (value === "none") return "bg-slate-100 text-muted-foreground";
-  return "bg-emerald-500/10 text-emerald-700";
+function incidentStatusBadgeClass(value: string) {
+  if (value === "resolved") return "bg-emerald-500/10 text-emerald-700";
+  if (["closed", "cancelled"].includes(value)) return "bg-destructive/10 text-destructive";
+  return "bg-muted text-muted-foreground";
+}
+
+
+function urgencyBadgeClass(value: string) {
+  if (value === "critical") return "bg-destructive/10 text-destructive";
+  if (value === "high") return "bg-amber-500/10 text-amber-700";
+  return "bg-muted text-muted-foreground";
+}
+
+function urgencyIconClass(value: string) {
+  if (value === "critical") return "bg-destructive/10 text-destructive";
+  if (value === "high") return "bg-amber-500/10 text-amber-700";
+  if (value === "medium") return "bg-blue-500/10 text-blue-700";
+  return "bg-muted text-muted-foreground";
 }
 
 function relativeDueLabel(value: string, now: Date) {
@@ -670,46 +1187,30 @@ function relativeLabel(value: number, unit: "minuto" | "hora" | "día") {
   return value > 0 ? `en ${amount} ${plural}` : `hace ${amount} ${plural}`;
 }
 
-function incidentPriority(incident: MaintenanceIncident, now: Date) {
-  let score = 0;
-  if (!incident.assigned_to) score += 30;
-  if (incident.urgency === "critical") score += 100;
-  if (incident.urgency === "high") score += 70;
-  if (dueState(incident.due_at, now) === "overdue") score += 120;
-  if (dueState(incident.due_at, now) === "today") score += 45;
-  if (closedStatuses.has(incident.reports?.status ?? "")) score -= 100;
-  return score;
+function confidenceValue(incident: MaintenanceIncident) {
+  return Math.round(Number(incident.reports?.ai_confidence ?? 0) * 100);
 }
 
-function sortIncidents(
-  left: { incident: MaintenanceIncident; priority: number },
-  right: { incident: MaintenanceIncident; priority: number },
-  sort: SortMode,
-) {
-  if (sort === "newest") {
-    return new Date(right.incident.created_at).getTime() - new Date(left.incident.created_at).getTime();
-  }
-  if (sort === "oldest") {
-    return new Date(left.incident.created_at).getTime() - new Date(right.incident.created_at).getTime();
-  }
-  if (sort === "due") {
-    return dueSortValue(left.incident.due_at) - dueSortValue(right.incident.due_at);
-  }
-  return right.priority - left.priority || new Date(right.incident.created_at).getTime() - new Date(left.incident.created_at).getTime();
+function shortReportId(value: string) {
+  return value.slice(0, 8);
 }
 
-function dueSortValue(value: string | null) {
-  return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+function incidentHref(filters: IncidentFiltersState) {
+  const params = new URLSearchParams();
+  const cleanQuery = filters.query.trim();
+
+  if (cleanQuery) params.set("q", cleanQuery);
+  if (filters.status !== "all") params.set("status", filters.status);
+  if (filters.urgency !== "all") params.set("urgency", filters.urgency);
+  if (filters.category !== "all") params.set("category", filters.category);
+  if (filters.assignment !== "all") params.set("assignment", filters.assignment);
+  if (filters.due !== "all") params.set("due", filters.due);
+  if (filters.dateFrom) params.set("from", filters.dateFrom);
+  if (filters.dateTo) params.set("to", filters.dateTo);
+  if (filters.sort !== "priority") params.set("sort", filters.sort);
+  if (filters.page > 1) params.set("page", String(filters.page));
+
+  const search = params.toString();
+  return search ? `/dashboard/mantenimiento/incidencias?${search}` : "/dashboard/mantenimiento/incidencias";
 }
 
-function shortId(value: string) {
-  return value.length > 10 ? value.slice(0, 10) : value;
-}
-
-function normalize(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}

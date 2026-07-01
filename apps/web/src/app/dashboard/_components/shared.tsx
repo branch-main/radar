@@ -9,7 +9,7 @@ export function Panel({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "rounded-xl border border-[#e7f0f2] bg-white/85 p-4 backdrop-blur",
+        "rounded-xl border border-[#e7f0f2] bg-white/90 p-4 text-sm",
         className,
       )}
       {...props}
@@ -84,7 +84,7 @@ export function EmptyState({
 }) {
   return (
     <div className="py-6 text-center">
-      <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+      <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Icon className="size-5" />
       </div>
       <p className="mt-3 text-sm font-medium">{title}</p>

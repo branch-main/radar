@@ -41,7 +41,7 @@ export function buildActionQueue({
       id: "overdue-incidents",
       title: `${overdueIncidents.length} incidencias vencidas`,
       detail: "Requieren revisión de SLA y responsable",
-      href: "/dashboard/mantenimiento",
+      href: "/dashboard/mantenimiento/incidencias",
       severity: "critical",
       icon: Timer,
     });
@@ -52,7 +52,7 @@ export function buildActionQueue({
       id: "critical-incidents",
       title: `${criticalIncidents.length} incidencias críticas`,
       detail: "Riesgo alto para operación del campus",
-      href: "/dashboard/mantenimiento",
+      href: "/dashboard/mantenimiento/incidencias",
       severity: "critical",
       icon: AlertTriangle,
     });
@@ -63,7 +63,7 @@ export function buildActionQueue({
       id: "unassigned-incidents",
       title: `${unassignedIncidents.length} incidencias sin técnico`,
       detail: "Asignación pendiente del equipo",
-      href: "/dashboard/mantenimiento",
+      href: "/dashboard/mantenimiento/incidencias",
       severity: "warning",
       icon: UserCog,
     });
@@ -74,7 +74,7 @@ export function buildActionQueue({
       id: "pending-claims",
       title: `${pendingClaims.length} reclamos por revisar`,
       detail: "Validar evidencia y aprobar o rechazar",
-      href: "/dashboard/objetos-perdidos",
+      href: "/dashboard/objetos-perdidos/catalogo",
       severity: "warning",
       icon: ShieldCheck,
     });
@@ -118,7 +118,7 @@ export function buildActivity(
       detail: `${formatLocation(incident.reports)} · ${categoryLabels[incident.category] ?? incident.category}`,
       date: incident.created_at,
       status: incident.reports?.status ?? "classified",
-      href: "/dashboard/mantenimiento",
+      href: "/dashboard/mantenimiento/incidencias",
       icon: AlertTriangle,
     })),
     ...lostItems.map((item) => ({
@@ -127,7 +127,7 @@ export function buildActivity(
       detail: `${statusLabel(item.reports?.type ?? "unknown")} · ${formatLocation(item.reports)}`,
       date: item.created_at,
       status: item.status,
-      href: "/dashboard/objetos-perdidos",
+      href: "/dashboard/objetos-perdidos/catalogo",
       icon: Package,
     })),
     ...claims.map((claim) => ({
@@ -136,7 +136,7 @@ export function buildActivity(
       detail: claim.claimant?.email ?? claim.claimed_by,
       date: claim.created_at,
       status: claim.status,
-      href: claim.status === "approved" ? "/dashboard/objetos-perdidos/entregas" : "/dashboard/objetos-perdidos",
+      href: claim.status === "approved" ? "/dashboard/objetos-perdidos/entregas" : "/dashboard/objetos-perdidos/catalogo",
       icon: ShieldCheck,
     })),
     ...matches.map((match) => ({

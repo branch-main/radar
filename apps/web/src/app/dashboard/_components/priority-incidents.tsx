@@ -5,7 +5,7 @@ import { formatDateTime, formatLocation } from "@/lib/supabase/format";
 import type { MaintenanceIncident } from "@/lib/supabase/types";
 
 import { categoryLabels } from "./dashboard-constants";
-import { dueBadgeClass, dueLabel, urgencyDotClass } from "./dashboard-calculations";
+import { dueBadgeClass, dueLabel, isDueSoon, isOverdue, urgencyDotClass } from "./dashboard-calculations";
 import { Badge, EmptyState, Panel, PanelTitle, SoftRow } from "./shared";
 
 export function PriorityIncidents({ incidents, now }: { incidents: MaintenanceIncident[]; now: Date }) {
@@ -15,7 +15,7 @@ export function PriorityIncidents({ incidents, now }: { incidents: MaintenanceIn
         eyebrow="Mantenimiento"
         title="Cola crítica"
         action={
-          <Link href="/dashboard/mantenimiento" className="inline-flex items-center gap-1 rounded-lg bg-muted/45 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground">
+          <Link href="/dashboard/mantenimiento/incidencias" className="inline-flex items-center gap-1 rounded-lg bg-muted/45 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground">
             Ver todo
             <ArrowRight className="size-3.5" />
           </Link>
@@ -27,7 +27,7 @@ export function PriorityIncidents({ incidents, now }: { incidents: MaintenanceIn
       ) : (
         <div className="space-y-2">
           {incidents.map((incident) => (
-            <Link key={incident.report_id} href="/dashboard/mantenimiento" className="block">
+            <Link key={incident.report_id} href="/dashboard/mantenimiento/incidencias" className="block">
               <SoftRow className="grid gap-3 lg:grid-cols-[1fr_auto]">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -37,6 +37,9 @@ export function PriorityIncidents({ incidents, now }: { incidents: MaintenanceIn
                     </h3>
                     <Badge value={incident.urgency} />
                     <Badge value={incident.reports?.status ?? "classified"} />
+                    <span className="rounded-lg bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      {priorityReason(incident, now)}
+                    </span>
                   </div>
                   <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
                     {incident.reports?.description ?? "Sin descripción"}
@@ -65,4 +68,13 @@ export function PriorityIncidents({ incidents, now }: { incidents: MaintenanceIn
       )}
     </Panel>
   );
+}
+
+function priorityReason(incident: MaintenanceIncident, now: Date) {
+  if (isOverdue(incident.due_at, now)) return "SLA vencida";
+  if (incident.urgency === "critical") return "Crítica";
+  if (!incident.assigned_to) return "Sin técnico";
+  if (isDueSoon(incident.due_at, now)) return "Por vencer";
+  if (incident.urgency === "high") return "Alta";
+  return "Seguimiento";
 }

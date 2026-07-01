@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
+import { DashboardQueryProvider } from "@/app/dashboard/_components/dashboard-query-provider";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   SidebarInset,
@@ -42,7 +43,7 @@ export default async function DashboardLayout({
           </span>
         </header>
         <div className="mx-auto flex min-h-0 w-full max-w-[96rem] flex-1 flex-col gap-4 px-4 py-6 md:px-6 md:py-8">
-          {children}
+          <DashboardQueryProvider>{children}</DashboardQueryProvider>
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -59,6 +59,30 @@ export function buildDashboardModel({
   const actionMatches = matches.filter((match) => ACTION_MATCH_STATUSES.has(match.status));
   const confirmedMatches = matches.filter((match) => match.status === "confirmed");
   const activeTechnicians = technicians.filter((technician) => technician.active);
+  const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const createdLast7Days = [...incidents, ...lostItems].filter(
+    (item) => new Date(item.created_at).getTime() >= sevenDaysAgo,
+  ).length;
+  const closedLast7Days =
+    incidents.filter(
+      (incident) => incident.completed_at && new Date(incident.completed_at).getTime() >= sevenDaysAgo,
+    ).length +
+    lostItems.filter(
+      (item) => item.delivered_at && new Date(item.delivered_at).getTime() >= sevenDaysAgo,
+    ).length;
+  const openDates = [
+    ...openIncidents.map((incident) => incident.created_at),
+    ...activeItems.map((item) => item.created_at),
+    ...pendingClaims.map((claim) => claim.created_at),
+    ...actionMatches.map((match) => match.created_at),
+  ];
+  const oldestOpenDays = openDates.length
+    ? Math.max(
+        ...openDates.map((date) =>
+          Math.max(0, Math.floor((now.getTime() - new Date(date).getTime()) / (24 * 60 * 60 * 1000))),
+        ),
+      )
+    : 0;
 
   const resolved = dashboard.reports_by_status.resolved ?? 0;
   const closed = dashboard.reports_by_status.closed ?? 0;
@@ -87,15 +111,19 @@ export function buildDashboardModel({
     actionMatches,
   });
 
-  const crmIncidents = [...openIncidents]
+  const crmIncidents = [...incidents]
+    .sort((left, right) => {
+      const priorityDifference = incidentPriority(right, now) - incidentPriority(left, now);
+      if (priorityDifference !== 0) return priorityDifference;
+      return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
+    });
+
+  const crmLostItems = [...lostItems]
+    .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime());
+
+  const priorityIncidents = [...openIncidents]
     .sort((left, right) => incidentPriority(right, now) - incidentPriority(left, now))
-    .slice(0, 12);
-
-  const crmLostItems = [...activeItems]
-    .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime())
-    .slice(0, 12);
-
-  const priorityIncidents = crmIncidents.slice(0, 4);
+    .slice(0, 4);
 
   const technicianLoads: TechnicianLoad[] = activeTechnicians
     .map((technician) => {
@@ -126,6 +154,16 @@ export function buildDashboardModel({
       activeTechnicians: activeTechnicians.length,
       openWorkload,
       riskCount,
+      overdueIncidents: overdueIncidents.length,
+      dueSoonIncidents: dueSoonIncidents.length,
+      criticalIncidents: criticalIncidents.length,
+      unassignedIncidents: unassignedIncidents.length,
+      pendingClaims: pendingClaims.length,
+      approvedClaims: approvedClaims.length,
+      actionMatches: actionMatches.length,
+      createdLast7Days,
+      closedLast7Days,
+      oldestOpenDays,
       healthScore,
       resolutionRate,
       catalogResolutionRate,
@@ -134,26 +172,26 @@ export function buildDashboardModel({
     actionQueue,
     kpis: [
       {
-        label: "Carga operativa",
+        label: "Trabajo abierto",
         value: openWorkload,
-        detail: `${openIncidents.length} incidencias, ${activeItems.length} objetos, ${pendingClaims.length} reclamos`,
-        href: "/dashboard/mantenimiento",
+        detail: `${openIncidents.length} incidencias, ${activeItems.length} objetos, ${oldestOpenDays} días máx. en cola`,
+        href: "/dashboard/mantenimiento/incidencias",
         icon: dashboardKpiIcons.workload,
         severity: riskCount > 0 ? "warning" : "success",
       },
       {
-        label: "SLA en riesgo",
+        label: "SLA crítico",
         value: overdueIncidents.length + dueSoonIncidents.length,
-        detail: `${overdueIncidents.length} vencidas, ${dueSoonIncidents.length} por vencer`,
-        href: "/dashboard/mantenimiento",
+        detail: `${overdueIncidents.length} vencidas, ${dueSoonIncidents.length} por vencer, ${unassignedIncidents.length} sin técnico`,
+        href: "/dashboard/mantenimiento/incidencias",
         icon: dashboardKpiIcons.timer,
         severity: overdueIncidents.length > 0 ? "critical" : dueSoonIncidents.length > 0 ? "warning" : "success",
       },
       {
-        label: "Reclamos pendientes",
-        value: pendingClaims.length,
-        detail: `${approvedClaims.length} aprobados esperan entrega`,
-        href: "/dashboard/objetos-perdidos/entregas",
+        label: "Validaciones",
+        value: pendingClaims.length + actionMatches.length,
+        detail: `${pendingClaims.length} reclamos y ${actionMatches.length} matches por decidir`,
+        href: "/dashboard/objetos-perdidos/catalogo",
         icon: dashboardKpiIcons.claims,
         severity: pendingClaims.length > 0 ? "warning" : "success",
       },
@@ -162,7 +200,7 @@ export function buildDashboardModel({
         value: resolutionRate,
         suffix: "%",
         detail: `${resolved + closed} de ${dashboard.totals.reports} reportes cerrados`,
-        href: "/dashboard/mantenimiento",
+        href: "/dashboard/mantenimiento/incidencias",
         icon: dashboardKpiIcons.resolution,
         severity: resolutionRate >= 70 ? "success" : resolutionRate >= 40 ? "info" : "neutral",
       },
@@ -178,8 +216,8 @@ export function buildDashboardModel({
     maintenanceByCategory: orderCategoryBuckets(dashboard.maintenance_by_category),
     reportStatusBuckets: orderStatusBuckets(dashboard.reports_by_status).slice(0, 5),
     lostFoundPipeline: [
-      { label: "Catálogo activo", value: activeItems.length, href: "/dashboard/objetos-perdidos", icon: dashboardKpiIcons.package },
-      { label: "Reclamos pendientes", value: pendingClaims.length, href: "/dashboard/objetos-perdidos", icon: dashboardKpiIcons.pendingClaim },
+      { label: "Catálogo activo", value: activeItems.length, href: "/dashboard/objetos-perdidos/catalogo", icon: dashboardKpiIcons.package },
+      { label: "Reclamos pendientes", value: pendingClaims.length, href: "/dashboard/objetos-perdidos/catalogo", icon: dashboardKpiIcons.pendingClaim },
       { label: "Listos para entrega", value: approvedClaims.length, href: "/dashboard/objetos-perdidos/entregas", icon: dashboardKpiIcons.ready },
       { label: "Entregados", value: deliveredClaims.length, href: "/dashboard/objetos-perdidos/entregas", icon: dashboardKpiIcons.delivered },
     ],
@@ -200,7 +238,7 @@ function buildMapPoints(incidents: MaintenanceIncident[], items: LostItem[]): Ma
         title: report?.title ?? "Incidencia sin título",
         detail: report?.campus_zones ? `${report.campus_zones.building} · ${report.campus_zones.name}` : incident.category,
         status: incident.urgency,
-        href: "/dashboard/mantenimiento",
+        href: "/dashboard/mantenimiento/incidencias",
         x: position.x,
         y: position.y,
         building: report?.campus_zones?.building ?? "Sin edificio",
@@ -215,7 +253,7 @@ function buildMapPoints(incidents: MaintenanceIncident[], items: LostItem[]): Ma
         title: item.item_name || report?.title || "Objeto sin nombre",
         detail: report?.campus_zones ? `${report.campus_zones.building} · ${report.campus_zones.name}` : item.item_category,
         status: item.status,
-        href: "/dashboard/objetos-perdidos",
+        href: "/dashboard/objetos-perdidos/catalogo",
         x: position.x,
         y: position.y,
         building: report?.campus_zones?.building ?? item.custody_location ?? "Sin edificio",

@@ -14,7 +14,7 @@ export type SelectOption = {
 };
 
 const navItems = [
-  { href: "/dashboard/objetos-perdidos", label: "Catálogo" },
+  { href: "/dashboard/objetos-perdidos/catalogo", label: "Catálogo" },
   { href: "/dashboard/objetos-perdidos/matches", label: "Matches" },
   { href: "/dashboard/objetos-perdidos/entregas", label: "Entregas" },
 ];

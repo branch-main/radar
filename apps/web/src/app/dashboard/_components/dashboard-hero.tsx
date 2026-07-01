@@ -11,12 +11,11 @@ export function DashboardHero({ model }: { model: DashboardModel }) {
   return (
     <section className="space-y-4">
       <div className="min-w-0 rounded-2xl border border-[#e7f0f2] bg-[linear-gradient(135deg,#dae9eb_0%,#edf6f7_100%)] p-5 md:p-6">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
           <span className="font-semibold tracking-[0.16em] text-primary uppercase">
             Centro de operaciones
           </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
+          <span className="text-muted-foreground sm:text-right">
             {formatDateTime(now.toISOString())}
           </span>
         </div>
@@ -30,14 +29,14 @@ export function DashboardHero({ model }: { model: DashboardModel }) {
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Link
-            href="/dashboard/mantenimiento"
+            href="/dashboard/mantenimiento/incidencias"
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Revisar incidencias
             <ArrowRight className="size-4" />
           </Link>
           <Link
-            href="/dashboard/objetos-perdidos"
+            href="/dashboard/objetos-perdidos/catalogo"
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/60 px-4 text-sm font-medium transition-colors hover:bg-white/80"
           >
             Objetos perdidos

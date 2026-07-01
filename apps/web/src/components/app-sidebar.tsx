@@ -58,7 +58,7 @@ const navSections: NavSection[] = [
   {
     label: "Mantenimiento",
     items: [
-      { title: "Incidencias", href: "/dashboard/mantenimiento", icon: AlertTriangle },
+      { title: "Incidencias", href: "/dashboard/mantenimiento/incidencias", icon: AlertTriangle },
       { title: "Técnicos", href: "/dashboard/mantenimiento/tecnicos", icon: Wrench },
       { title: "Edificios", href: "/dashboard/mantenimiento/edificios", icon: Building2 },
     ],
@@ -66,7 +66,7 @@ const navSections: NavSection[] = [
   {
     label: "Objetos Perdidos",
     items: [
-      { title: "Catálogo", href: "/dashboard/objetos-perdidos", icon: Package },
+      { title: "Catálogo", href: "/dashboard/objetos-perdidos/catalogo", icon: Package },
       { title: "Matches", href: "/dashboard/objetos-perdidos/matches", icon: Search },
       { title: "Entregas", href: "/dashboard/objetos-perdidos/entregas", icon: PackageCheck },
     ],

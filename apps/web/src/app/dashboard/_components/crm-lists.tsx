@@ -9,7 +9,7 @@ import type { LostItem, MaintenanceIncident } from "@/lib/supabase/types";
 import { categoryLabels } from "./dashboard-constants";
 import { Badge } from "./shared";
 
-const VISIBLE_ROWS = 5;
+const MAX_DASHBOARD_LIST_ITEMS = 8;
 
 export function CrmLists({
   incidents,
@@ -33,7 +33,7 @@ function IncidentsTable({ incidents }: { incidents: MaintenanceIncident[] }) {
     () => incidents.filter((incident) => matchesIncident(incident, normalizedQuery)),
     [incidents, normalizedQuery],
   );
-  const visibleIncidents = filteredIncidents.slice(0, VISIBLE_ROWS);
+  const visibleIncidents = filteredIncidents.slice(0, MAX_DASHBOARD_LIST_ITEMS);
 
   return (
     <section className="overflow-hidden rounded-xl border border-[#e7f0f2] bg-white/90">
@@ -106,7 +106,7 @@ function LostItemsTable({ lostItems }: { lostItems: LostItem[] }) {
     () => lostItems.filter((item) => matchesLostItem(item, normalizedQuery)),
     [lostItems, normalizedQuery],
   );
-  const visibleLostItems = filteredLostItems.slice(0, VISIBLE_ROWS);
+  const visibleLostItems = filteredLostItems.slice(0, MAX_DASHBOARD_LIST_ITEMS);
 
   return (
     <section className="overflow-hidden rounded-xl border border-[#e7f0f2] bg-white/90">

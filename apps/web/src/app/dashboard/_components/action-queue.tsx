@@ -32,9 +32,12 @@ export function ActionQueue({ queue }: { queue: QueueItem[] }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {queue.slice(0, 5).map((item) => (
+          {queue.slice(0, 5).map((item, index) => (
             <Link key={item.id} href={item.href} className="group block">
               <SoftRow className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-background text-xs font-semibold text-muted-foreground">
+                  {index + 1}
+                </span>
                 <span className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${softIconClass(item.severity)}`}>
                   <item.icon className="size-4" />
                 </span>

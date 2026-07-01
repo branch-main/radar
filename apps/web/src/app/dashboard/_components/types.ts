@@ -81,6 +81,16 @@ export type DashboardModel = {
     activeTechnicians: number;
     openWorkload: number;
     riskCount: number;
+    overdueIncidents: number;
+    dueSoonIncidents: number;
+    criticalIncidents: number;
+    unassignedIncidents: number;
+    pendingClaims: number;
+    approvedClaims: number;
+    actionMatches: number;
+    createdLast7Days: number;
+    closedLast7Days: number;
+    oldestOpenDays: number;
     healthScore: number;
     resolutionRate: number;
     catalogResolutionRate: number;

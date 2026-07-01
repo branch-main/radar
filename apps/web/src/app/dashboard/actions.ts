@@ -38,7 +38,7 @@ export async function updateMaintenanceAction(formData: FormData) {
   await updateMaintenanceIncident(reportId, payload);
 
   revalidateDashboard();
-  revalidatePath("/dashboard/mantenimiento");
+  revalidatePath("/dashboard/mantenimiento/incidencias");
 }
 
 export async function createTechnicianAction(formData: FormData) {
@@ -51,6 +51,7 @@ export async function createTechnicianAction(formData: FormData) {
 
   revalidateDashboard();
   revalidatePath("/dashboard/mantenimiento/tecnicos");
+  revalidatePath("/dashboard/mantenimiento/tecnicos/nuevo");
 }
 
 export async function updateTechnicianAction(formData: FormData) {
@@ -66,6 +67,7 @@ export async function updateTechnicianAction(formData: FormData) {
 
   revalidateDashboard();
   revalidatePath("/dashboard/mantenimiento/tecnicos");
+  revalidatePath(`/dashboard/mantenimiento/tecnicos/${technicianId}`);
 }
 
 export async function createZoneAction(formData: FormData) {
@@ -122,7 +124,7 @@ export async function updateClaimAction(formData: FormData) {
   });
 
   revalidateDashboard();
-  revalidatePath("/dashboard/objetos-perdidos");
+  revalidatePath("/dashboard/objetos-perdidos/catalogo");
   revalidatePath("/dashboard/objetos-perdidos/entregas");
 }
 
@@ -135,7 +137,7 @@ export async function updateMatchAction(formData: FormData) {
   await updateMatch(matchId, status);
 
   revalidateDashboard();
-  revalidatePath("/dashboard/objetos-perdidos");
+  revalidatePath("/dashboard/objetos-perdidos/catalogo");
   revalidatePath("/dashboard/objetos-perdidos/matches");
 }
 

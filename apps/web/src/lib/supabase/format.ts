@@ -61,10 +61,10 @@ export function statusLabel(status: string) {
 }
 
 export function badgeClass(status: string) {
-  if (["critical", "high", "new", "classified", "pending", "suggested"].includes(status)) {
+  if (["critical", "high", "new", "classified", "pending", "suggested", "claim_pending", "lost_item"].includes(status)) {
     return "bg-amber-500/10 text-amber-700";
   }
-  if (["in_progress", "assigned", "waiting_claim", "claim_pending", "claimed"].includes(status)) {
+  if (["in_progress", "assigned", "waiting_claim", "claimed"].includes(status)) {
     return "bg-blue-500/10 text-blue-700";
   }
   if (["resolved", "closed", "approved", "delivered", "confirmed"].includes(status)) {
